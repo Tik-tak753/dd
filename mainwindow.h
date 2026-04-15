@@ -28,6 +28,7 @@ private slots:
     void onTogglePlaybackClicked();
     void onStopPlaybackClicked();
     void onLoadModelClicked();
+    void onPerformanceProfileChanged(int index);
     void onPlaybackTick();
 
 private:

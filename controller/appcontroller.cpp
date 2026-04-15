@@ -16,6 +16,7 @@
 AppController::AppController()
 {
     activateStubDetector(QStringLiteral("no ONNX model loaded"));
+    applyVideoPerformanceSettings(settingsForProfile(videoPerformanceProfile_));
 }
 
 AppController::~AppController() = default;
@@ -126,8 +127,11 @@ bool AppController::openVideo(const QString &filePath, QString *statusMessage)
     cachedVideoDetections_.clear();
     hasLastFrameTimestamp_ = false;
     smoothedFps_ = 0.0;
-    *statusMessage = QStringLiteral("[%1] Video opened: %2")
-                         .arg(detectorStatusText(), loadedVideoPath_);
+    *statusMessage = QStringLiteral("[%1] Video opened: %2 | Profile=%3 | Mode=%4")
+                         .arg(detectorStatusText())
+                         .arg(loadedVideoPath_)
+                         .arg(currentVideoPerformanceProfileName())
+                         .arg(videoInferenceModeText());
     return true;
 }
 
@@ -197,10 +201,11 @@ bool AppController::processNextVideoFrame(QImage *outputImage,
     }
 
     *hasFrame = true;
-    *statusMessage = QStringLiteral("[%1] Video=%2 | Detections=%3 | FPS=%4 | Mode=%5 | DetectorStep=%6")
+    *statusMessage = QStringLiteral("[%1] Video=%2 | Detections=%3 | FPS=%4 | Profile=%5 | Mode=%6 | DetectorStep=%7")
                          .arg(detectorStatusText(), loadedVideoPath_)
                          .arg(static_cast<int>(detectionsToDraw.size()))
                          .arg(QString::number(smoothedFps_, 'f', 1))
+                         .arg(currentVideoPerformanceProfileName())
                          .arg(videoInferenceModeText())
                          .arg(ranDetection ? QStringLiteral("run") : QStringLiteral("skip"));
     ++videoFrameIndex_;
@@ -224,6 +229,29 @@ bool AppController::hasOpenVideo() const
     return videoCapture_.isOpened();
 }
 
+bool AppController::setVideoPerformanceProfile(VideoPerformanceProfile profile, QString *statusMessage)
+{
+    if (statusMessage == nullptr) {
+        return false;
+    }
+
+    videoPerformanceProfile_ = profile;
+    applyVideoPerformanceSettings(settingsForProfile(videoPerformanceProfile_));
+    cachedVideoDetections_.clear();
+    videoFrameIndex_ = 0;
+
+    *statusMessage = QStringLiteral("[%1] Video profile set to %2 (%3)")
+                         .arg(detectorStatusText())
+                         .arg(currentVideoPerformanceProfileName())
+                         .arg(videoInferenceModeText());
+    return true;
+}
+
+QString AppController::currentVideoPerformanceProfileName() const
+{
+    return settingsForProfile(videoPerformanceProfile_).profileName;
+}
+
 void AppController::activateStubDetector(const QString &reason)
 {
     detector_ = std::make_unique<StubDetector>();
@@ -245,6 +273,27 @@ QString AppController::detectorStatusText() const
     const QString modelText = loadedModelPath_.isEmpty() ? QStringLiteral("<none>") : loadedModelPath_;
     return QStringLiteral("Detector=%1 | Model=%2 | Detail=%3")
         .arg(activeDetectorName_, modelText, detectorStatusDetail_);
+}
+
+AppController::VideoPerformanceSettings
+AppController::settingsForProfile(VideoPerformanceProfile profile) const
+{
+    switch (profile) {
+    case VideoPerformanceProfile::Fast:
+        return {QStringLiteral("Fast"), true, cv::Size(416, 234), 2};
+    case VideoPerformanceProfile::Accurate:
+        return {QStringLiteral("Accurate"), true, cv::Size(960, 540), 0};
+    case VideoPerformanceProfile::Balanced:
+    default:
+        return {QStringLiteral("Balanced"), true, cv::Size(640, 360), 1};
+    }
+}
+
+void AppController::applyVideoPerformanceSettings(const VideoPerformanceSettings &settings)
+{
+    reduceVideoInferenceResolution_ = settings.reduceResolution;
+    videoInferenceResolution_ = settings.inferenceResolution;
+    videoInferenceFrameSkip_ = std::max(0, settings.frameSkip);
 }
 
 cv::Mat AppController::createVideoInferenceFrame(const cv::Mat &frame) const

@@ -18,6 +18,13 @@ class YoloDetector;
 class AppController
 {
 public:
+    enum class VideoPerformanceProfile
+    {
+        Fast,
+        Balanced,
+        Accurate
+    };
+
     AppController();
     ~AppController();
 
@@ -28,8 +35,20 @@ public:
     bool processNextVideoFrame(QImage *outputImage, QString *statusMessage, bool *hasFrame);
     void stopVideo();
     bool hasOpenVideo() const;
+    bool setVideoPerformanceProfile(VideoPerformanceProfile profile, QString *statusMessage);
+    QString currentVideoPerformanceProfileName() const;
 
 private:
+    struct VideoPerformanceSettings
+    {
+        QString profileName;
+        bool reduceResolution;
+        cv::Size inferenceResolution;
+        int frameSkip;
+    };
+
+    VideoPerformanceSettings settingsForProfile(VideoPerformanceProfile profile) const;
+    void applyVideoPerformanceSettings(const VideoPerformanceSettings &settings);
     cv::Mat createVideoInferenceFrame(const cv::Mat &frame) const;
     DetectionList remapDetectionsToDisplayFrame(const DetectionList &detections,
                                                 const cv::Size &inferenceSize,
@@ -50,6 +69,7 @@ private:
     bool reduceVideoInferenceResolution_ = true;
     cv::Size videoInferenceResolution_ = cv::Size(640, 360);
     int videoInferenceFrameSkip_ = 1;
+    VideoPerformanceProfile videoPerformanceProfile_ = VideoPerformanceProfile::Balanced;
     int videoFrameIndex_ = 0;
     DetectionList cachedVideoDetections_;
 

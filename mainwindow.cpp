@@ -4,8 +4,24 @@
 #include "controller/appcontroller.h"
 
 #include <QFileDialog>
+#include <QComboBox>
 #include <QImage>
 #include <QPixmap>
+
+namespace {
+AppController::VideoPerformanceProfile profileFromIndex(int index)
+{
+    switch (index) {
+    case 0:
+        return AppController::VideoPerformanceProfile::Fast;
+    case 2:
+        return AppController::VideoPerformanceProfile::Accurate;
+    case 1:
+    default:
+        return AppController::VideoPerformanceProfile::Balanced;
+    }
+}
+}
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -21,10 +37,21 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->playPauseButton, &QPushButton::clicked, this, &MainWindow::onTogglePlaybackClicked);
     connect(ui->stopPlaybackButton, &QPushButton::clicked, this, &MainWindow::onStopPlaybackClicked);
     connect(ui->loadModelButton, &QPushButton::clicked, this, &MainWindow::onLoadModelClicked);
+    connect(ui->performanceProfileComboBox,
+            qOverload<int>(&QComboBox::currentIndexChanged),
+            this,
+            &MainWindow::onPerformanceProfileChanged);
     connect(&playbackTimer_, &QTimer::timeout, this, &MainWindow::onPlaybackTick);
 
+    ui->performanceProfileComboBox->setCurrentIndex(1);
+    QString profileStatusMessage;
+    controller_->setVideoPerformanceProfile(profileFromIndex(ui->performanceProfileComboBox->currentIndex()),
+                                            &profileStatusMessage);
+
     setPlaybackRunning(false);
-    statusBar()->showMessage(QStringLiteral("Ready. %1").arg(controller_->currentDetectorStatus()));
+    statusBar()->showMessage(
+        QStringLiteral("Ready. %1 | Profile=%2")
+            .arg(controller_->currentDetectorStatus(), controller_->currentVideoPerformanceProfileName()));
 }
 
 MainWindow::~MainWindow()
@@ -67,6 +94,13 @@ void MainWindow::onLoadModelClicked()
 
     QString statusMessage;
     controller_->loadOnnxModel(modelPath, &statusMessage);
+    statusBar()->showMessage(statusMessage);
+}
+
+void MainWindow::onPerformanceProfileChanged(int index)
+{
+    QString statusMessage;
+    controller_->setVideoPerformanceProfile(profileFromIndex(index), &statusMessage);
     statusBar()->showMessage(statusMessage);
 }
 
