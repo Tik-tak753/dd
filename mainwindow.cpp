@@ -16,7 +16,8 @@ MainWindow::MainWindow(QWidget *parent)
     setWindowTitle(QStringLiteral("Drone Detection Demo"));
 
     connect(ui->openImageButton, &QPushButton::clicked, this, &MainWindow::onOpenImageClicked);
-    statusBar()->showMessage(QStringLiteral("Ready. Open an image to run detection."));
+    connect(ui->loadModelButton, &QPushButton::clicked, this, &MainWindow::onLoadModelClicked);
+    statusBar()->showMessage(QStringLiteral("Ready. %1").arg(controller_->currentDetectorStatus()));
 }
 
 MainWindow::~MainWindow()
@@ -42,6 +43,23 @@ void MainWindow::onOpenImageClicked()
         displayImage(outputImage);
     }
 
+    statusBar()->showMessage(statusMessage);
+}
+
+void MainWindow::onLoadModelClicked()
+{
+    const QString modelPath = QFileDialog::getOpenFileName(this,
+                                                           QStringLiteral("Load ONNX Model"),
+                                                           QString(),
+                                                           QStringLiteral("ONNX Models (*.onnx)"));
+    if (modelPath.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("Model selection canceled. %1")
+                                     .arg(controller_->currentDetectorStatus()));
+        return;
+    }
+
+    QString statusMessage;
+    controller_->loadOnnxModel(modelPath, &statusMessage);
     statusBar()->showMessage(statusMessage);
 }
 
