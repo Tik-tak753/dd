@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <mutex>
 
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -24,6 +25,7 @@ AppController::~AppController() = default;
 
 bool AppController::loadOnnxModel(const QString &modelPath, QString *statusMessage)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (statusMessage == nullptr) {
         return false;
     }
@@ -54,6 +56,7 @@ bool AppController::loadOnnxModel(const QString &modelPath, QString *statusMessa
 
 QString AppController::currentDetectorStatus() const
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return detectorStatusText();
 }
 
@@ -61,6 +64,7 @@ bool AppController::loadImageAndRunDetection(const QString &filePath,
                                              QImage *outputImage,
                                              QString *statusMessage) const
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (outputImage == nullptr || statusMessage == nullptr) {
         return false;
     }
@@ -104,6 +108,7 @@ bool AppController::loadImageAndRunDetection(const QString &filePath,
 
 bool AppController::openVideo(const QString &filePath, QString *statusMessage)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (statusMessage == nullptr) {
         return false;
     }
@@ -140,6 +145,7 @@ bool AppController::processNextVideoFrame(QImage *outputImage,
                                           QString *statusMessage,
                                           bool *hasFrame)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (outputImage == nullptr || statusMessage == nullptr || hasFrame == nullptr) {
         return false;
     }
@@ -249,6 +255,7 @@ bool AppController::processNextVideoFrame(QImage *outputImage,
 
 void AppController::stopVideo()
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (videoCapture_.isOpened()) {
         videoCapture_.release();
     }
@@ -261,11 +268,13 @@ void AppController::stopVideo()
 
 bool AppController::hasOpenVideo() const
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return videoCapture_.isOpened();
 }
 
 bool AppController::setVideoPerformanceProfile(VideoPerformanceProfile profile, QString *statusMessage)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (statusMessage == nullptr) {
         return false;
     }
@@ -284,6 +293,7 @@ bool AppController::setVideoPerformanceProfile(VideoPerformanceProfile profile, 
 
 QString AppController::currentVideoPerformanceProfileName() const
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return settingsForProfile(videoPerformanceProfile_).profileName;
 }
 
