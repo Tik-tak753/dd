@@ -18,3 +18,8 @@ DetectionList StubDetector::detect(const cv::Mat &image) const
     detections.push_back(Detection{cv::Rect(x, y, boxWidth, boxHeight), 0.85f, "stub-drone"});
     return detections;
 }
+
+std::string StubDetector::detectorName() const
+{
+    return "StubDetector";
+}

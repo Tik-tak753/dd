@@ -2,15 +2,44 @@
 
 #include "detection/idetector.h"
 #include "detection/stubdetector.h"
+#include "detection/yolodetector.h"
 #include "utils/cvqtutils.h"
 
 #include <QFile>
 
 #include <opencv2/imgcodecs.hpp>
 
-AppController::AppController()
-    : detector_(std::make_unique<StubDetector>())
+namespace {
+
+QString configuredYoloModelPath()
 {
+    // Code-based configuration placeholder for future ONNX integration.
+    return QString();
+}
+
+} // namespace
+
+AppController::AppController()
+{
+    const QString yoloModelPath = configuredYoloModelPath();
+
+    if (!yoloModelPath.isEmpty()) {
+        std::unique_ptr<YoloDetector> yoloDetector = std::make_unique<YoloDetector>(yoloModelPath);
+        if (yoloDetector->isReady()) {
+            detector_ = std::move(yoloDetector);
+            detectorStatusDetail_ = QStringLiteral("YoloDetector active (model: %1)").arg(yoloModelPath);
+        }
+    }
+
+    if (!detector_) {
+        detector_ = std::make_unique<StubDetector>();
+        if (yoloModelPath.isEmpty()) {
+            detectorStatusDetail_ = QStringLiteral("StubDetector active (fallback: no YOLO model configured)");
+        } else {
+            detectorStatusDetail_ = QStringLiteral("StubDetector active (fallback: invalid YOLO model path: %1)")
+                                        .arg(yoloModelPath);
+        }
+    }
 }
 
 AppController::~AppController() = default;
@@ -25,7 +54,8 @@ bool AppController::loadImageAndRunDetection(const QString &filePath,
 
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
-        *statusMessage = QStringLiteral("Failed to open image file: %1").arg(filePath);
+        *statusMessage = QStringLiteral("[%1] Failed to open image file: %2")
+                             .arg(detectorStatusDetail_, filePath);
         *outputImage = QImage();
         return false;
     }
@@ -36,7 +66,8 @@ bool AppController::loadImageAndRunDetection(const QString &filePath,
     cv::Mat image = cv::imdecode(buffer, cv::IMREAD_COLOR);
 
     if (image.empty()) {
-        *statusMessage = QStringLiteral("Failed to decode image: %1").arg(filePath);
+        *statusMessage = QStringLiteral("[%1] Failed to decode image: %2")
+                             .arg(detectorStatusDetail_, filePath);
         *outputImage = QImage();
         return false;
     }
@@ -46,11 +77,13 @@ bool AppController::loadImageAndRunDetection(const QString &filePath,
 
     *outputImage = CvQtUtils::matToQImage(image);
     if (outputImage->isNull()) {
-        *statusMessage = QStringLiteral("Loaded image, but conversion to QImage failed.");
+        *statusMessage = QStringLiteral("[%1] Loaded image, but conversion to QImage failed.")
+                             .arg(detectorStatusDetail_);
         return false;
     }
 
-    *statusMessage = QStringLiteral("Loaded %1 with %2 stub detection(s).")
+    *statusMessage = QStringLiteral("[%1] Loaded %2 with %3 detection(s).")
+                         .arg(detectorStatusDetail_)
                          .arg(filePath)
                          .arg(static_cast<int>(detections.size()));
     return true;

@@ -18,6 +18,7 @@ public:
 
 private:
     std::unique_ptr<IDetector> detector_;
+    QString detectorStatusDetail_;
 };
 
 #endif // APPCONTROLLER_H
