@@ -10,6 +10,7 @@ class IDetector
 public:
     virtual ~IDetector() = default;
     virtual DetectionList detect(const cv::Mat &image) const = 0;
+    virtual std::string detectorName() const = 0;
 };
 
 #endif // IDETECTOR_H

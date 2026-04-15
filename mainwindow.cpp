@@ -16,7 +16,7 @@ MainWindow::MainWindow(QWidget *parent)
     setWindowTitle(QStringLiteral("Drone Detection Demo"));
 
     connect(ui->openImageButton, &QPushButton::clicked, this, &MainWindow::onOpenImageClicked);
-    statusBar()->showMessage(QStringLiteral("Ready. Open an image to run stub detection."));
+    statusBar()->showMessage(QStringLiteral("Ready. Open an image to run detection."));
 }
 
 MainWindow::~MainWindow()

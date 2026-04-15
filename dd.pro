@@ -9,6 +9,7 @@ CONFIG += c++17
 SOURCES += \
     controller/appcontroller.cpp \
     detection/stubdetector.cpp \
+    detection/yolodetector.cpp \
     main.cpp \
     mainwindow.cpp \
     utils/cvqtutils.cpp
@@ -18,6 +19,7 @@ HEADERS += \
     detection/detection.h \
     detection/idetector.h \
     detection/stubdetector.h \
+    detection/yolodetector.h \
     mainwindow.h \
     utils/cvqtutils.h
 
