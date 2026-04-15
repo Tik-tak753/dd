@@ -5,6 +5,7 @@
 #include "detection/yolodetector.h"
 #include "utils/cvqtutils.h"
 
+#include <QDebug>
 #include <QFile>
 
 #include <algorithm>
@@ -181,14 +182,43 @@ bool AppController::processNextVideoFrame(QImage *outputImage,
         cachedVideoDetections_.empty() || videoInferenceFrameSkip_ <= 0 ||
         (videoFrameIndex_ % (videoInferenceFrameSkip_ + 1) == 0);
     bool ranDetection = false;
+    cv::Size inferenceFrameSize = frame.size();
 
     if (shouldRunDetection) {
         cv::Mat inferenceFrame = createVideoInferenceFrame(frame);
+        inferenceFrameSize = inferenceFrame.size();
         DetectionList detections = detector_->detect(inferenceFrame);
         detectionsToDraw = remapDetectionsToDisplayFrame(detections, inferenceFrame.size(), frame.size());
         cachedVideoDetections_ = detectionsToDraw;
         ranDetection = true;
+    } else if (reduceVideoInferenceResolution_) {
+        const int targetWidth = std::max(1, videoInferenceResolution_.width);
+        const int targetHeight = std::max(1, videoInferenceResolution_.height);
+        if (frame.cols > targetWidth || frame.rows > targetHeight) {
+            const float scale =
+                std::min(static_cast<float>(targetWidth) / static_cast<float>(frame.cols),
+                         static_cast<float>(targetHeight) / static_cast<float>(frame.rows));
+            inferenceFrameSize = cv::Size(
+                std::max(1, static_cast<int>(std::round(static_cast<float>(frame.cols) * scale))),
+                std::max(1, static_cast<int>(std::round(static_cast<float>(frame.rows) * scale))));
+        }
     }
+
+    const QString inferencePath = (inferenceFrameSize == frame.size())
+        ? QStringLiteral("original-frame")
+        : QStringLiteral("resized-copy");
+    qInfo().noquote()
+        << QStringLiteral(
+               "VideoFrame[%1] Profile=%2 FrameSkip=%3 SourceSize=%4x%5 InferenceSize=%6x%7 InferencePath=%8 DetectorStep=%9")
+               .arg(videoFrameIndex_)
+               .arg(currentVideoPerformanceProfileName())
+               .arg(videoInferenceFrameSkip_)
+               .arg(frame.cols)
+               .arg(frame.rows)
+               .arg(inferenceFrameSize.width)
+               .arg(inferenceFrameSize.height)
+               .arg(inferencePath)
+               .arg(ranDetection ? QStringLiteral("run") : QStringLiteral("skip"));
 
     CvQtUtils::drawDetections(frame, detectionsToDraw);
 
@@ -201,12 +231,17 @@ bool AppController::processNextVideoFrame(QImage *outputImage,
     }
 
     *hasFrame = true;
-    *statusMessage = QStringLiteral("[%1] Video=%2 | Detections=%3 | FPS=%4 | Profile=%5 | Mode=%6 | DetectorStep=%7")
+    *statusMessage =
+        QStringLiteral("[%1] Video=%2 | Detections=%3 | FPS=%4 | Profile=%5 | Mode=%6 | Inference=%7x%8 (%9) | FrameSkip=%10 | DetectorStep=%11")
                          .arg(detectorStatusText(), loadedVideoPath_)
                          .arg(static_cast<int>(detectionsToDraw.size()))
                          .arg(QString::number(smoothedFps_, 'f', 1))
                          .arg(currentVideoPerformanceProfileName())
                          .arg(videoInferenceModeText())
+                         .arg(inferenceFrameSize.width)
+                         .arg(inferenceFrameSize.height)
+                         .arg(inferencePath)
+                         .arg(videoInferenceFrameSkip_)
                          .arg(ranDetection ? QStringLiteral("run") : QStringLiteral("skip"));
     ++videoFrameIndex_;
     return true;
