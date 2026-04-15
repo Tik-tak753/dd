@@ -4,12 +4,16 @@
 #include "detection/stubdetector.h"
 #include "utils/cvqtutils.h"
 
+#include <QFile>
+
 #include <opencv2/imgcodecs.hpp>
 
 AppController::AppController()
     : detector_(std::make_unique<StubDetector>())
 {
 }
+
+AppController::~AppController() = default;
 
 bool AppController::loadImageAndRunDetection(const QString &filePath,
                                              QImage *outputImage,
@@ -19,11 +23,20 @@ bool AppController::loadImageAndRunDetection(const QString &filePath,
         return false;
     }
 
-    const std::string filePathStd = filePath.toStdString();
-    cv::Mat image = cv::imread(filePathStd, cv::IMREAD_COLOR);
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        *statusMessage = QStringLiteral("Failed to open image file: %1").arg(filePath);
+        *outputImage = QImage();
+        return false;
+    }
+
+    const QByteArray bytes = file.readAll();
+    const std::vector<uchar> buffer(bytes.begin(), bytes.end());
+
+    cv::Mat image = cv::imdecode(buffer, cv::IMREAD_COLOR);
 
     if (image.empty()) {
-        *statusMessage = QStringLiteral("Failed to load image: %1").arg(filePath);
+        *statusMessage = QStringLiteral("Failed to decode image: %1").arg(filePath);
         *outputImage = QImage();
         return false;
     }

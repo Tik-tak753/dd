@@ -12,6 +12,7 @@ class AppController
 {
 public:
     AppController();
+    ~AppController();
 
     bool loadImageAndRunDetection(const QString &filePath, QImage *outputImage, QString *statusMessage) const;
 
