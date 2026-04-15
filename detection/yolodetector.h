@@ -20,7 +20,18 @@ public:
     QString statusDetail() const;
 
 private:
-    DetectionList decodeDetections(const cv::Mat &output, const cv::Size &sourceSize) const;
+    struct LetterboxInfo
+    {
+        float scale = 1.0f;
+        int padLeft = 0;
+        int padTop = 0;
+        bool used = false;
+    };
+
+    cv::Mat preprocessLetterbox(const cv::Mat &image, LetterboxInfo *letterboxInfo) const;
+    DetectionList decodeDetections(const cv::Mat &output,
+                                   const cv::Size &sourceSize,
+                                   const LetterboxInfo &letterboxInfo) const;
 
     QString modelPath_;
     QString statusDetail_;
