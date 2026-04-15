@@ -2,10 +2,12 @@
 #include "ui_mainwindow.h"
 
 #include "controller/appcontroller.h"
+#include "controller/videoinferenceworker.h"
 
 #include <QFileDialog>
 #include <QComboBox>
 #include <QImage>
+#include <QMetaObject>
 #include <QPixmap>
 
 namespace {
@@ -32,6 +34,16 @@ MainWindow::MainWindow(QWidget *parent)
     setWindowTitle(QStringLiteral("Drone Detection Demo"));
     playbackTimer_.setInterval(33);
 
+    videoWorker_ = new VideoInferenceWorker(controller_.get());
+    videoWorker_->moveToThread(&videoWorkerThread_);
+    connect(&videoWorkerThread_, &QThread::finished, videoWorker_, &QObject::deleteLater);
+    connect(videoWorker_,
+            &VideoInferenceWorker::frameProcessed,
+            this,
+            &MainWindow::onFrameProcessed,
+            Qt::QueuedConnection);
+    videoWorkerThread_.start();
+
     connect(ui->openImageButton, &QPushButton::clicked, this, &MainWindow::onOpenImageClicked);
     connect(ui->openVideoButton, &QPushButton::clicked, this, &MainWindow::onOpenVideoClicked);
     connect(ui->playPauseButton, &QPushButton::clicked, this, &MainWindow::onTogglePlaybackClicked);
@@ -56,6 +68,10 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    setPlaybackRunning(false);
+    pendingInferenceRequest_ = false;
+    videoWorkerThread_.quit();
+    videoWorkerThread_.wait();
     delete ui;
 }
 
@@ -116,8 +132,13 @@ void MainWindow::onOpenVideoClicked()
     }
 
     QString statusMessage;
+    ++playbackGeneration_;
+    inferenceInFlight_ = false;
+    pendingInferenceRequest_ = false;
+
     if (controller_->openVideo(filePath, &statusMessage)) {
         setPlaybackRunning(true);
+        requestNextVideoFrame();
     } else {
         setPlaybackRunning(false);
     }
@@ -141,24 +162,60 @@ void MainWindow::onTogglePlaybackClicked()
 void MainWindow::onStopPlaybackClicked()
 {
     setPlaybackRunning(false);
+    ++playbackGeneration_;
+    pendingInferenceRequest_ = false;
     controller_->stopVideo();
     statusBar()->showMessage(QStringLiteral("Playback stopped."));
 }
 
 void MainWindow::onPlaybackTick()
 {
-    QImage frameImage;
-    QString statusMessage;
-    bool hasFrame = false;
-    const bool ok = controller_->processNextVideoFrame(&frameImage, &statusMessage, &hasFrame);
+    requestNextVideoFrame();
+}
+
+void MainWindow::onFrameProcessed(int generation,
+                                  const QImage &frameImage,
+                                  const QString &statusMessage,
+                                  bool hasFrame,
+                                  bool ok)
+{
+    inferenceInFlight_ = false;
+
+    if (generation != playbackGeneration_) {
+        return;
+    }
 
     if (ok && hasFrame) {
         displayImage(frameImage);
     } else {
         setPlaybackRunning(false);
+        pendingInferenceRequest_ = false;
     }
 
     statusBar()->showMessage(statusMessage);
+
+    if (isPlaybackRunning_ && pendingInferenceRequest_) {
+        pendingInferenceRequest_ = false;
+        requestNextVideoFrame();
+    }
+}
+
+void MainWindow::requestNextVideoFrame()
+{
+    if (!isPlaybackRunning_ || !controller_->hasOpenVideo()) {
+        return;
+    }
+
+    if (inferenceInFlight_) {
+        pendingInferenceRequest_ = true;
+        return;
+    }
+
+    inferenceInFlight_ = true;
+    QMetaObject::invokeMethod(videoWorker_,
+                              "processFrame",
+                              Qt::QueuedConnection,
+                              Q_ARG(int, playbackGeneration_));
 }
 
 void MainWindow::displayImage(const QImage &image)
@@ -175,6 +232,7 @@ void MainWindow::setPlaybackRunning(bool isRunning)
         ui->playPauseButton->setText(QStringLiteral("Pause"));
     } else {
         playbackTimer_.stop();
+        pendingInferenceRequest_ = false;
         ui->playPauseButton->setText(QStringLiteral("Play"));
     }
 }

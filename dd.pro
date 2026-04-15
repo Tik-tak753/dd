@@ -8,6 +8,7 @@ CONFIG += c++17
 
 SOURCES += \
     controller/appcontroller.cpp \
+    controller/videoinferenceworker.cpp \
     detection/stubdetector.cpp \
     detection/yolodetector.cpp \
     main.cpp \
@@ -16,6 +17,7 @@ SOURCES += \
 
 HEADERS += \
     controller/appcontroller.h \
+    controller/videoinferenceworker.h \
     detection/detection.h \
     detection/idetector.h \
     detection/stubdetector.h \

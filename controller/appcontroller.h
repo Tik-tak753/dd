@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <memory>
+#include <mutex>
 
 #include <opencv2/core.hpp>
 #include <opencv2/videoio.hpp>
@@ -58,6 +59,8 @@ private:
     void activateStubDetector(const QString &reason);
     void activateYoloDetector(std::unique_ptr<YoloDetector> yoloDetector, const QString &modelPath);
     QString detectorStatusText() const;
+
+    mutable std::recursive_mutex mutex_;
 
     std::unique_ptr<IDetector> detector_;
     QString activeDetectorName_;
