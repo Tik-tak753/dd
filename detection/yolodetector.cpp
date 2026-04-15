@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <opencv2/dnn/dnn.hpp>
+#include <opencv2/imgproc.hpp>
 
 YoloDetector::YoloDetector(QString modelPath)
     : modelPath_(std::move(modelPath))
@@ -46,14 +47,19 @@ DetectionList YoloDetector::detect(const cv::Mat &image) const
     }
 
     try {
-        cv::Mat blob;
-        cv::dnn::blobFromImage(image,
-                               blob,
-                               1.0 / 255.0,
-                               cv::Size(inputWidth_, inputHeight_),
-                               cv::Scalar(),
-                               true,
-                               false);
+        LetterboxInfo letterboxInfo;
+        cv::Mat blob = preprocessLetterbox(image, &letterboxInfo);
+        if (blob.empty()) {
+            qWarning() << "YoloDetector preprocessing failed.";
+            return detections;
+        }
+
+        qDebug() << "YoloDetector input image size:" << image.cols << "x" << image.rows;
+        qDebug() << "YoloDetector network input size:" << inputWidth_ << "x" << inputHeight_;
+        qDebug() << "YoloDetector letterbox: used =" << letterboxInfo.used
+                 << "scale =" << letterboxInfo.scale
+                 << "padLeft =" << letterboxInfo.padLeft
+                 << "padTop =" << letterboxInfo.padTop;
 
         net_.setInput(blob);
 
@@ -65,7 +71,13 @@ DetectionList YoloDetector::detect(const cv::Mat &image) const
         }
 
         for (const cv::Mat &output : outputs) {
-            DetectionList decoded = decodeDetections(output, image.size());
+            QStringList shapeParts;
+            for (int i = 0; i < output.dims; ++i) {
+                shapeParts << QString::number(output.size[i]);
+            }
+            qDebug() << "YoloDetector raw output tensor shape:" << ("[" + shapeParts.join(",") + "]");
+
+            DetectionList decoded = decodeDetections(output, image.size(), letterboxInfo);
             detections.insert(detections.end(), decoded.begin(), decoded.end());
         }
     } catch (const cv::Exception &e) {
@@ -76,24 +88,67 @@ DetectionList YoloDetector::detect(const cv::Mat &image) const
     return detections;
 }
 
-DetectionList YoloDetector::decodeDetections(const cv::Mat &output, const cv::Size &sourceSize) const
+cv::Mat YoloDetector::preprocessLetterbox(const cv::Mat &image, LetterboxInfo *letterboxInfo) const
+{
+    if (image.empty() || letterboxInfo == nullptr) {
+        return cv::Mat();
+    }
+
+    const float scale = std::min(static_cast<float>(inputWidth_) / static_cast<float>(image.cols),
+                                 static_cast<float>(inputHeight_) / static_cast<float>(image.rows));
+    const int resizedWidth = static_cast<int>(std::round(static_cast<float>(image.cols) * scale));
+    const int resizedHeight = static_cast<int>(std::round(static_cast<float>(image.rows) * scale));
+
+    cv::Mat resized;
+    cv::resize(image, resized, cv::Size(resizedWidth, resizedHeight), 0.0, 0.0, cv::INTER_LINEAR);
+
+    const int padWidth = inputWidth_ - resizedWidth;
+    const int padHeight = inputHeight_ - resizedHeight;
+    const int padLeft = padWidth / 2;
+    const int padRight = padWidth - padLeft;
+    const int padTop = padHeight / 2;
+    const int padBottom = padHeight - padTop;
+
+    cv::Mat padded;
+    cv::copyMakeBorder(resized,
+                       padded,
+                       padTop,
+                       padBottom,
+                       padLeft,
+                       padRight,
+                       cv::BORDER_CONSTANT,
+                       cv::Scalar(114.0, 114.0, 114.0));
+
+    cv::Mat blob;
+    cv::dnn::blobFromImage(padded,
+                           blob,
+                           1.0 / 255.0,
+                           cv::Size(inputWidth_, inputHeight_),
+                           cv::Scalar(),
+                           true,
+                           false);
+
+    letterboxInfo->scale = scale;
+    letterboxInfo->padLeft = padLeft;
+    letterboxInfo->padTop = padTop;
+    letterboxInfo->used = (padLeft != 0 || padTop != 0 || resizedWidth != inputWidth_ || resizedHeight != inputHeight_);
+
+    return blob;
+}
+
+DetectionList YoloDetector::decodeDetections(const cv::Mat &output,
+                                             const cv::Size &sourceSize,
+                                             const LetterboxInfo &letterboxInfo) const
 {
     DetectionList detections;
-
-    QStringList shapeParts;
-    for (int i = 0; i < output.dims; ++i) {
-        shapeParts << QString::number(output.size[i]);
-    }
-    qDebug() << "YoloDetector output shape:" << ("[" + shapeParts.join(",") + "]");
 
     cv::Mat parsed = output;
 
     if (parsed.dims == 3 && parsed.size[0] == 1) {
-        if (parsed.size[1] > parsed.size[2]) {
-            parsed = parsed.reshape(1, {parsed.size[1], parsed.size[2]});
-        } else {
-            parsed = parsed.reshape(1, {parsed.size[2], parsed.size[1]});
-        }
+        const int dim1 = parsed.size[1];
+        const int dim2 = parsed.size[2];
+        parsed = (dim2 >= dim1) ? parsed.reshape(1, {dim1, dim2})
+                                : parsed.reshape(1, {dim2, dim1});
     } else if (parsed.dims > 2) {
         parsed = parsed.reshape(1, parsed.total() / parsed.size[parsed.dims - 1]);
     }
@@ -114,14 +169,11 @@ DetectionList YoloDetector::decodeDetections(const cv::Mat &output, const cv::Si
     const int classOffset = hasObjectness ? 5 : 4;
     const int classCount = std::max(0, parsed.cols - classOffset);
 
-    const float inputScaleX = static_cast<float>(sourceSize.width) / static_cast<float>(inputWidth_);
-    const float inputScaleY = static_cast<float>(sourceSize.height) / static_cast<float>(inputHeight_);
-
     std::vector<cv::Rect> boxes;
     std::vector<float> scores;
     std::vector<int> classIds;
     const int rawCandidates = parsed.rows;
-    int confidenceCandidates = 0;
+    int thresholdedCandidates = 0;
 
     for (int row = 0; row < parsed.rows; ++row) {
         const float *data = parsed.ptr<float>(row);
@@ -162,17 +214,20 @@ DetectionList YoloDetector::decodeDetections(const cv::Mat &output, const cv::Si
             continue;
         }
 
-        ++confidenceCandidates;
+        ++thresholdedCandidates;
 
-        const bool normalizedCoords =
-            centerX <= 1.5f && centerY <= 1.5f && width <= 1.5f && height <= 1.5f;
-        const float coordScaleX = normalizedCoords ? static_cast<float>(sourceSize.width) : inputScaleX;
-        const float coordScaleY = normalizedCoords ? static_cast<float>(sourceSize.height) : inputScaleY;
+        const bool normalizedCoords = centerX <= 1.5f && centerY <= 1.5f && width <= 1.5f && height <= 1.5f;
+        if (normalizedCoords) {
+            centerX *= static_cast<float>(inputWidth_);
+            centerY *= static_cast<float>(inputHeight_);
+            width *= static_cast<float>(inputWidth_);
+            height *= static_cast<float>(inputHeight_);
+        }
 
-        centerX *= coordScaleX;
-        centerY *= coordScaleY;
-        width *= coordScaleX;
-        height *= coordScaleY;
+        centerX = (centerX - static_cast<float>(letterboxInfo.padLeft)) / letterboxInfo.scale;
+        centerY = (centerY - static_cast<float>(letterboxInfo.padTop)) / letterboxInfo.scale;
+        width /= letterboxInfo.scale;
+        height /= letterboxInfo.scale;
 
         const int left = std::max(0, static_cast<int>(std::round(centerX - 0.5f * width)));
         const int top = std::max(0, static_cast<int>(std::round(centerY - 0.5f * height)));
@@ -191,7 +246,7 @@ DetectionList YoloDetector::decodeDetections(const cv::Mat &output, const cv::Si
     }
 
     qDebug() << "YoloDetector candidates: raw =" << rawCandidates
-             << ", after confidence =" << confidenceCandidates;
+             << ", after threshold =" << thresholdedCandidates;
 
     std::vector<int> keptIndices;
     cv::dnn::NMSBoxes(boxes, scores, scoreThreshold_, nmsThreshold_, keptIndices);
