@@ -6,6 +6,7 @@
 #include "utils/cvqtutils.h"
 
 #include <QFile>
+#include <QProcessEnvironment>
 
 #include <opencv2/imgcodecs.hpp>
 
@@ -13,8 +14,7 @@ namespace {
 
 QString configuredYoloModelPath()
 {
-    // Code-based configuration placeholder for future ONNX integration.
-    return QString();
+    return QProcessEnvironment::systemEnvironment().value(QStringLiteral("DRONE_YOLO_ONNX_PATH")).trimmed();
 }
 
 } // namespace
@@ -28,16 +28,20 @@ AppController::AppController()
         if (yoloDetector->isReady()) {
             detector_ = std::move(yoloDetector);
             detectorStatusDetail_ = QStringLiteral("YoloDetector active (model: %1)").arg(yoloModelPath);
+        } else {
+            detectorStatusDetail_ = QStringLiteral("YoloDetector unavailable (%1)").arg(yoloDetector->statusDetail());
         }
     }
 
     if (!detector_) {
         detector_ = std::make_unique<StubDetector>();
         if (yoloModelPath.isEmpty()) {
-            detectorStatusDetail_ = QStringLiteral("StubDetector active (fallback: no YOLO model configured)");
+            detectorStatusDetail_ = QStringLiteral(
+                "StubDetector active (fallback: DRONE_YOLO_ONNX_PATH is not configured)");
+        } else if (!detectorStatusDetail_.isEmpty()) {
+            detectorStatusDetail_ = QStringLiteral("StubDetector active (fallback: %1)").arg(detectorStatusDetail_);
         } else {
-            detectorStatusDetail_ = QStringLiteral("StubDetector active (fallback: invalid YOLO model path: %1)")
-                                        .arg(yoloModelPath);
+            detectorStatusDetail_ = QStringLiteral("StubDetector active (fallback: invalid YOLO setup)");
         }
     }
 }
