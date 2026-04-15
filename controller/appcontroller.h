@@ -6,6 +6,8 @@
 
 #include <memory>
 
+#include <opencv2/videoio.hpp>
+
 class IDetector;
 class YoloDetector;
 
@@ -18,6 +20,10 @@ public:
     bool loadOnnxModel(const QString &modelPath, QString *statusMessage);
     QString currentDetectorStatus() const;
     bool loadImageAndRunDetection(const QString &filePath, QImage *outputImage, QString *statusMessage) const;
+    bool openVideo(const QString &filePath, QString *statusMessage);
+    bool processNextVideoFrame(QImage *outputImage, QString *statusMessage, bool *hasFrame);
+    void stopVideo();
+    bool hasOpenVideo() const;
 
 private:
     void activateStubDetector(const QString &reason);
@@ -28,6 +34,8 @@ private:
     QString activeDetectorName_;
     QString loadedModelPath_;
     QString detectorStatusDetail_;
+    QString loadedVideoPath_;
+    cv::VideoCapture videoCapture_;
 };
 
 #endif // APPCONTROLLER_H

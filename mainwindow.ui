@@ -25,6 +25,27 @@
        </widget>
       </item>
       <item>
+       <widget class="QPushButton" name="openVideoButton">
+        <property name="text">
+         <string>Open Video</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="playPauseButton">
+        <property name="text">
+         <string>Play</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="stopPlaybackButton">
+        <property name="text">
+         <string>Stop</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QPushButton" name="loadModelButton">
         <property name="text">
          <string>Load Model</string>
@@ -76,7 +97,7 @@
            <set>Qt::AlignCenter</set>
           </property>
           <property name="text">
-           <string>Open an image to preview detection results.</string>
+           <string>Open an image or video to preview detection results.</string>
           </property>
          </widget>
         </item>

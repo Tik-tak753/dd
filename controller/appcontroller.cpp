@@ -96,6 +96,89 @@ bool AppController::loadImageAndRunDetection(const QString &filePath,
     return true;
 }
 
+bool AppController::openVideo(const QString &filePath, QString *statusMessage)
+{
+    if (statusMessage == nullptr) {
+        return false;
+    }
+
+    const QString trimmedPath = filePath.trimmed();
+    if (trimmedPath.isEmpty()) {
+        *statusMessage = QStringLiteral("[%1] Failed to open video: empty path.")
+                             .arg(detectorStatusText());
+        return false;
+    }
+
+    cv::VideoCapture capture(trimmedPath.toStdString());
+    if (!capture.isOpened()) {
+        *statusMessage = QStringLiteral("[%1] Failed to open video file: %2")
+                             .arg(detectorStatusText(), trimmedPath);
+        return false;
+    }
+
+    videoCapture_ = std::move(capture);
+    loadedVideoPath_ = trimmedPath;
+    *statusMessage = QStringLiteral("[%1] Video opened: %2")
+                         .arg(detectorStatusText(), loadedVideoPath_);
+    return true;
+}
+
+bool AppController::processNextVideoFrame(QImage *outputImage,
+                                          QString *statusMessage,
+                                          bool *hasFrame)
+{
+    if (outputImage == nullptr || statusMessage == nullptr || hasFrame == nullptr) {
+        return false;
+    }
+
+    if (!videoCapture_.isOpened()) {
+        *hasFrame = false;
+        *statusMessage = QStringLiteral("[%1] No video is currently open.")
+                             .arg(detectorStatusText());
+        *outputImage = QImage();
+        return false;
+    }
+
+    cv::Mat frame;
+    if (!videoCapture_.read(frame) || frame.empty()) {
+        *hasFrame = false;
+        *outputImage = QImage();
+        *statusMessage = QStringLiteral("[%1] End of video: %2")
+                             .arg(detectorStatusText(), loadedVideoPath_);
+        return true;
+    }
+
+    const DetectionList detections = detector_->detect(frame);
+    CvQtUtils::drawDetections(frame, detections);
+
+    *outputImage = CvQtUtils::matToQImage(frame);
+    if (outputImage->isNull()) {
+        *hasFrame = false;
+        *statusMessage = QStringLiteral("[%1] Video frame conversion failed.")
+                             .arg(detectorStatusText());
+        return false;
+    }
+
+    *hasFrame = true;
+    *statusMessage = QStringLiteral("[%1] Video=%2 | Detections=%3")
+                         .arg(detectorStatusText(), loadedVideoPath_)
+                         .arg(static_cast<int>(detections.size()));
+    return true;
+}
+
+void AppController::stopVideo()
+{
+    if (videoCapture_.isOpened()) {
+        videoCapture_.release();
+    }
+    loadedVideoPath_.clear();
+}
+
+bool AppController::hasOpenVideo() const
+{
+    return videoCapture_.isOpened();
+}
+
 void AppController::activateStubDetector(const QString &reason)
 {
     detector_ = std::make_unique<StubDetector>();
