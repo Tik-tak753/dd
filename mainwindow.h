@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QTimer>
 
 #include <memory>
 
@@ -23,13 +24,20 @@ public:
 
 private slots:
     void onOpenImageClicked();
+    void onOpenVideoClicked();
+    void onTogglePlaybackClicked();
+    void onStopPlaybackClicked();
     void onLoadModelClicked();
+    void onPlaybackTick();
 
 private:
     void displayImage(const QImage &image);
+    void setPlaybackRunning(bool isRunning);
 
     Ui::MainWindow *ui;
     std::unique_ptr<AppController> controller_;
+    QTimer playbackTimer_;
+    bool isPlaybackRunning_ = false;
 };
 
 #endif // MAINWINDOW_H

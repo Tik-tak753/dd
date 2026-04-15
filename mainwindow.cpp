@@ -14,9 +14,16 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
     setWindowTitle(QStringLiteral("Drone Detection Demo"));
+    playbackTimer_.setInterval(33);
 
     connect(ui->openImageButton, &QPushButton::clicked, this, &MainWindow::onOpenImageClicked);
+    connect(ui->openVideoButton, &QPushButton::clicked, this, &MainWindow::onOpenVideoClicked);
+    connect(ui->playPauseButton, &QPushButton::clicked, this, &MainWindow::onTogglePlaybackClicked);
+    connect(ui->stopPlaybackButton, &QPushButton::clicked, this, &MainWindow::onStopPlaybackClicked);
     connect(ui->loadModelButton, &QPushButton::clicked, this, &MainWindow::onLoadModelClicked);
+    connect(&playbackTimer_, &QTimer::timeout, this, &MainWindow::onPlaybackTick);
+
+    setPlaybackRunning(false);
     statusBar()->showMessage(QStringLiteral("Ready. %1").arg(controller_->currentDetectorStatus()));
 }
 
@@ -63,8 +70,77 @@ void MainWindow::onLoadModelClicked()
     statusBar()->showMessage(statusMessage);
 }
 
+void MainWindow::onOpenVideoClicked()
+{
+    const QString filePath = QFileDialog::getOpenFileName(
+        this,
+        QStringLiteral("Open Video"),
+        QString(),
+        QStringLiteral("Videos (*.mp4 *.avi *.mov *.mkv *.wmv)"));
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    QString statusMessage;
+    if (controller_->openVideo(filePath, &statusMessage)) {
+        setPlaybackRunning(true);
+    } else {
+        setPlaybackRunning(false);
+    }
+
+    statusBar()->showMessage(statusMessage);
+}
+
+void MainWindow::onTogglePlaybackClicked()
+{
+    if (!controller_->hasOpenVideo()) {
+        statusBar()->showMessage(QStringLiteral("No video loaded. Open a video file first."));
+        return;
+    }
+
+    setPlaybackRunning(!isPlaybackRunning_);
+    statusBar()->showMessage(isPlaybackRunning_
+                                 ? QStringLiteral("Playback started.")
+                                 : QStringLiteral("Playback paused."));
+}
+
+void MainWindow::onStopPlaybackClicked()
+{
+    setPlaybackRunning(false);
+    controller_->stopVideo();
+    statusBar()->showMessage(QStringLiteral("Playback stopped."));
+}
+
+void MainWindow::onPlaybackTick()
+{
+    QImage frameImage;
+    QString statusMessage;
+    bool hasFrame = false;
+    const bool ok = controller_->processNextVideoFrame(&frameImage, &statusMessage, &hasFrame);
+
+    if (ok && hasFrame) {
+        displayImage(frameImage);
+    } else {
+        setPlaybackRunning(false);
+    }
+
+    statusBar()->showMessage(statusMessage);
+}
+
 void MainWindow::displayImage(const QImage &image)
 {
     ui->imageLabel->setPixmap(QPixmap::fromImage(image));
     ui->imageLabel->adjustSize();
+}
+
+void MainWindow::setPlaybackRunning(bool isRunning)
+{
+    isPlaybackRunning_ = isRunning;
+    if (isPlaybackRunning_) {
+        playbackTimer_.start();
+        ui->playPauseButton->setText(QStringLiteral("Pause"));
+    } else {
+        playbackTimer_.stop();
+        ui->playPauseButton->setText(QStringLiteral("Play"));
+    }
 }
