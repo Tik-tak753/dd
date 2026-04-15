@@ -3,11 +3,15 @@
 
 #include <QMainWindow>
 
+#include <memory>
+
 QT_BEGIN_NAMESPACE
 namespace Ui {
 class MainWindow;
 }
 QT_END_NAMESPACE
+
+class AppController;
 
 class MainWindow : public QMainWindow
 {
@@ -17,8 +21,14 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+private slots:
+    void onOpenImageClicked();
+
 private:
+    void displayImage(const QImage &image);
+
     Ui::MainWindow *ui;
+    std::unique_ptr<AppController> controller_;
 };
 
 #endif // MAINWINDOW_H

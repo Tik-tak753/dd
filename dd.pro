@@ -7,11 +7,19 @@ CONFIG += c++17
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += \
+    controller/appcontroller.cpp \
+    detection/stubdetector.cpp \
     main.cpp \
-    mainwindow.cpp
+    mainwindow.cpp \
+    utils/cvqtutils.cpp
 
 HEADERS += \
-    mainwindow.h
+    controller/appcontroller.h \
+    detection/detection.h \
+    detection/idetector.h \
+    detection/stubdetector.h \
+    mainwindow.h \
+    utils/cvqtutils.h
 
 FORMS += \
     mainwindow.ui
