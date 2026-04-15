@@ -23,6 +23,7 @@ public:
 
 private slots:
     void onOpenImageClicked();
+    void onLoadModelClicked();
 
 private:
     void displayImage(const QImage &image);

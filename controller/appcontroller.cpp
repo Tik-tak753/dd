@@ -6,47 +6,50 @@
 #include "utils/cvqtutils.h"
 
 #include <QFile>
-#include <QProcessEnvironment>
 
 #include <opencv2/imgcodecs.hpp>
 
-namespace {
-
-QString configuredYoloModelPath()
-{
-    return QProcessEnvironment::systemEnvironment().value(QStringLiteral("DRONE_YOLO_ONNX_PATH")).trimmed();
-}
-
-} // namespace
-
 AppController::AppController()
 {
-    const QString yoloModelPath = configuredYoloModelPath();
-
-    if (!yoloModelPath.isEmpty()) {
-        std::unique_ptr<YoloDetector> yoloDetector = std::make_unique<YoloDetector>(yoloModelPath);
-        if (yoloDetector->isReady()) {
-            detector_ = std::move(yoloDetector);
-            detectorStatusDetail_ = QStringLiteral("YoloDetector active (model: %1)").arg(yoloModelPath);
-        } else {
-            detectorStatusDetail_ = QStringLiteral("YoloDetector unavailable (%1)").arg(yoloDetector->statusDetail());
-        }
-    }
-
-    if (!detector_) {
-        detector_ = std::make_unique<StubDetector>();
-        if (yoloModelPath.isEmpty()) {
-            detectorStatusDetail_ = QStringLiteral(
-                "StubDetector active (fallback: DRONE_YOLO_ONNX_PATH is not configured)");
-        } else if (!detectorStatusDetail_.isEmpty()) {
-            detectorStatusDetail_ = QStringLiteral("StubDetector active (fallback: %1)").arg(detectorStatusDetail_);
-        } else {
-            detectorStatusDetail_ = QStringLiteral("StubDetector active (fallback: invalid YOLO setup)");
-        }
-    }
+    activateStubDetector(QStringLiteral("no ONNX model loaded"));
 }
 
 AppController::~AppController() = default;
+
+bool AppController::loadOnnxModel(const QString &modelPath, QString *statusMessage)
+{
+    if (statusMessage == nullptr) {
+        return false;
+    }
+
+    const QString trimmedPath = modelPath.trimmed();
+    if (trimmedPath.isEmpty()) {
+        activateStubDetector(QStringLiteral("empty model path"));
+        *statusMessage = QStringLiteral("[%1] Model load canceled: empty path selected.")
+                             .arg(detectorStatusText());
+        return false;
+    }
+
+    std::unique_ptr<YoloDetector> yoloDetector = std::make_unique<YoloDetector>(trimmedPath);
+    if (yoloDetector->isReady()) {
+        activateYoloDetector(std::move(yoloDetector), trimmedPath);
+        *statusMessage = QStringLiteral("[%1] ONNX model loaded successfully.")
+                             .arg(detectorStatusText());
+        return true;
+    }
+
+    const QString yoloFailureDetail = yoloDetector->statusDetail();
+    activateStubDetector(QStringLiteral("model load failed for %1 (%2)")
+                             .arg(trimmedPath, yoloFailureDetail));
+    *statusMessage = QStringLiteral("[%1] Failed to activate YoloDetector.")
+                         .arg(detectorStatusText());
+    return false;
+}
+
+QString AppController::currentDetectorStatus() const
+{
+    return detectorStatusText();
+}
 
 bool AppController::loadImageAndRunDetection(const QString &filePath,
                                              QImage *outputImage,
@@ -59,7 +62,7 @@ bool AppController::loadImageAndRunDetection(const QString &filePath,
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
         *statusMessage = QStringLiteral("[%1] Failed to open image file: %2")
-                             .arg(detectorStatusDetail_, filePath);
+                             .arg(detectorStatusText(), filePath);
         *outputImage = QImage();
         return false;
     }
@@ -71,7 +74,7 @@ bool AppController::loadImageAndRunDetection(const QString &filePath,
 
     if (image.empty()) {
         *statusMessage = QStringLiteral("[%1] Failed to decode image: %2")
-                             .arg(detectorStatusDetail_, filePath);
+                             .arg(detectorStatusText(), filePath);
         *outputImage = QImage();
         return false;
     }
@@ -82,13 +85,36 @@ bool AppController::loadImageAndRunDetection(const QString &filePath,
     *outputImage = CvQtUtils::matToQImage(image);
     if (outputImage->isNull()) {
         *statusMessage = QStringLiteral("[%1] Loaded image, but conversion to QImage failed.")
-                             .arg(detectorStatusDetail_);
+                             .arg(detectorStatusText());
         return false;
     }
 
     *statusMessage = QStringLiteral("[%1] Loaded %2 with %3 detection(s).")
-                         .arg(detectorStatusDetail_)
+                         .arg(detectorStatusText())
                          .arg(filePath)
                          .arg(static_cast<int>(detections.size()));
     return true;
+}
+
+void AppController::activateStubDetector(const QString &reason)
+{
+    detector_ = std::make_unique<StubDetector>();
+    activeDetectorName_ = QStringLiteral("StubDetector");
+    loadedModelPath_.clear();
+    detectorStatusDetail_ = reason;
+}
+
+void AppController::activateYoloDetector(std::unique_ptr<YoloDetector> yoloDetector, const QString &modelPath)
+{
+    detector_ = std::move(yoloDetector);
+    activeDetectorName_ = QStringLiteral("YoloDetector");
+    loadedModelPath_ = modelPath;
+    detectorStatusDetail_ = QStringLiteral("model loaded");
+}
+
+QString AppController::detectorStatusText() const
+{
+    const QString modelText = loadedModelPath_.isEmpty() ? QStringLiteral("<none>") : loadedModelPath_;
+    return QStringLiteral("Detector=%1 | Model=%2 | Detail=%3")
+        .arg(activeDetectorName_, modelText, detectorStatusDetail_);
 }
