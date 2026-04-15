@@ -53,6 +53,32 @@
        </widget>
       </item>
       <item>
+       <widget class="QLabel" name="performanceProfileLabel">
+        <property name="text">
+         <string>Profile:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="performanceProfileComboBox">
+        <item>
+         <property name="text">
+          <string>Fast</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Balanced</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Accurate</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item>
        <spacer name="horizontalSpacer">
         <property name="orientation">
          <enum>Qt::Horizontal</enum>
