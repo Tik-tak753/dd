@@ -7,7 +7,11 @@
 
 #include <QFile>
 
+#include <algorithm>
+#include <cmath>
+
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 
 AppController::AppController()
 {
@@ -118,6 +122,10 @@ bool AppController::openVideo(const QString &filePath, QString *statusMessage)
 
     videoCapture_ = std::move(capture);
     loadedVideoPath_ = trimmedPath;
+    videoFrameIndex_ = 0;
+    cachedVideoDetections_.clear();
+    hasLastFrameTimestamp_ = false;
+    smoothedFps_ = 0.0;
     *statusMessage = QStringLiteral("[%1] Video opened: %2")
                          .arg(detectorStatusText(), loadedVideoPath_);
     return true;
@@ -148,8 +156,37 @@ bool AppController::processNextVideoFrame(QImage *outputImage,
         return true;
     }
 
-    const DetectionList detections = detector_->detect(frame);
-    CvQtUtils::drawDetections(frame, detections);
+    const auto now = std::chrono::steady_clock::now();
+    if (hasLastFrameTimestamp_) {
+        const auto elapsedMs =
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFrameTimestamp_).count();
+        if (elapsedMs > 0) {
+            const double instantFps = 1000.0 / static_cast<double>(elapsedMs);
+            if (smoothedFps_ <= 0.0) {
+                smoothedFps_ = instantFps;
+            } else {
+                smoothedFps_ = smoothedFps_ * 0.85 + instantFps * 0.15;
+            }
+        }
+    }
+    lastFrameTimestamp_ = now;
+    hasLastFrameTimestamp_ = true;
+
+    DetectionList detectionsToDraw = cachedVideoDetections_;
+    const bool shouldRunDetection =
+        cachedVideoDetections_.empty() || videoInferenceFrameSkip_ <= 0 ||
+        (videoFrameIndex_ % (videoInferenceFrameSkip_ + 1) == 0);
+    bool ranDetection = false;
+
+    if (shouldRunDetection) {
+        cv::Mat inferenceFrame = createVideoInferenceFrame(frame);
+        DetectionList detections = detector_->detect(inferenceFrame);
+        detectionsToDraw = remapDetectionsToDisplayFrame(detections, inferenceFrame.size(), frame.size());
+        cachedVideoDetections_ = detectionsToDraw;
+        ranDetection = true;
+    }
+
+    CvQtUtils::drawDetections(frame, detectionsToDraw);
 
     *outputImage = CvQtUtils::matToQImage(frame);
     if (outputImage->isNull()) {
@@ -160,9 +197,13 @@ bool AppController::processNextVideoFrame(QImage *outputImage,
     }
 
     *hasFrame = true;
-    *statusMessage = QStringLiteral("[%1] Video=%2 | Detections=%3")
+    *statusMessage = QStringLiteral("[%1] Video=%2 | Detections=%3 | FPS=%4 | Mode=%5 | DetectorStep=%6")
                          .arg(detectorStatusText(), loadedVideoPath_)
-                         .arg(static_cast<int>(detections.size()));
+                         .arg(static_cast<int>(detectionsToDraw.size()))
+                         .arg(QString::number(smoothedFps_, 'f', 1))
+                         .arg(videoInferenceModeText())
+                         .arg(ranDetection ? QStringLiteral("run") : QStringLiteral("skip"));
+    ++videoFrameIndex_;
     return true;
 }
 
@@ -172,6 +213,10 @@ void AppController::stopVideo()
         videoCapture_.release();
     }
     loadedVideoPath_.clear();
+    cachedVideoDetections_.clear();
+    videoFrameIndex_ = 0;
+    hasLastFrameTimestamp_ = false;
+    smoothedFps_ = 0.0;
 }
 
 bool AppController::hasOpenVideo() const
@@ -200,4 +245,62 @@ QString AppController::detectorStatusText() const
     const QString modelText = loadedModelPath_.isEmpty() ? QStringLiteral("<none>") : loadedModelPath_;
     return QStringLiteral("Detector=%1 | Model=%2 | Detail=%3")
         .arg(activeDetectorName_, modelText, detectorStatusDetail_);
+}
+
+cv::Mat AppController::createVideoInferenceFrame(const cv::Mat &frame) const
+{
+    if (frame.empty() || !reduceVideoInferenceResolution_) {
+        return frame;
+    }
+
+    const int targetWidth = std::max(1, videoInferenceResolution_.width);
+    const int targetHeight = std::max(1, videoInferenceResolution_.height);
+    if (frame.cols <= targetWidth && frame.rows <= targetHeight) {
+        return frame;
+    }
+
+    const float scale = std::min(static_cast<float>(targetWidth) / static_cast<float>(frame.cols),
+                                 static_cast<float>(targetHeight) / static_cast<float>(frame.rows));
+    const int resizedWidth = std::max(1, static_cast<int>(std::round(static_cast<float>(frame.cols) * scale)));
+    const int resizedHeight = std::max(1, static_cast<int>(std::round(static_cast<float>(frame.rows) * scale)));
+
+    cv::Mat resized;
+    cv::resize(frame, resized, cv::Size(resizedWidth, resizedHeight), 0.0, 0.0, cv::INTER_LINEAR);
+    return resized;
+}
+
+DetectionList AppController::remapDetectionsToDisplayFrame(const DetectionList &detections,
+                                                           const cv::Size &inferenceSize,
+                                                           const cv::Size &displaySize) const
+{
+    if (detections.empty() || inferenceSize.width <= 0 || inferenceSize.height <= 0 ||
+        displaySize.width <= 0 || displaySize.height <= 0) {
+        return detections;
+    }
+
+    const float scaleX = static_cast<float>(displaySize.width) / static_cast<float>(inferenceSize.width);
+    const float scaleY = static_cast<float>(displaySize.height) / static_cast<float>(inferenceSize.height);
+
+    DetectionList remapped = detections;
+    for (Detection &detection : remapped) {
+        const int left = std::max(0, static_cast<int>(std::round(static_cast<float>(detection.box.x) * scaleX)));
+        const int top = std::max(0, static_cast<int>(std::round(static_cast<float>(detection.box.y) * scaleY)));
+        const int width = std::max(0, static_cast<int>(std::round(static_cast<float>(detection.box.width) * scaleX)));
+        const int height = std::max(0, static_cast<int>(std::round(static_cast<float>(detection.box.height) * scaleY)));
+
+        const int boundedWidth = std::min(width, displaySize.width - left);
+        const int boundedHeight = std::min(height, displaySize.height - top);
+        detection.box = cv::Rect(left, top, std::max(0, boundedWidth), std::max(0, boundedHeight));
+    }
+
+    return remapped;
+}
+
+QString AppController::videoInferenceModeText() const
+{
+    return QStringLiteral("infer=%1@%2x%3,skip=%4")
+        .arg(reduceVideoInferenceResolution_ ? QStringLiteral("resized") : QStringLiteral("full"))
+        .arg(videoInferenceResolution_.width)
+        .arg(videoInferenceResolution_.height)
+        .arg(videoInferenceFrameSkip_);
 }
